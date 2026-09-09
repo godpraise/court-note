@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 코트노트는 이메일 링크(비밀번호 없는) 로그인을 써요.
+    // 이 방식은 이메일만 있으면 누구나 로그인 계정을 만들 수 있기 때문에,
+    // 로그인 여부만으로는 데이터 접근을 막을 수 없어요.
+    // 그래서 실제 데이터 접근은 admins 컬렉션에 등록된 이메일만 허용해요.
+    // (admins 컬렉션: 문서 ID = 허용할 코치 이메일 주소, 내용은 아무거나 상관없음)
+    match /{document=**} {
+      allow read, write: if request.auth != null
+        && request.auth.token.email != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.token.email));
+    }
+  }
+}
