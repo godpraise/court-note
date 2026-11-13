@@ -5,8 +5,8 @@
 // 새 버전을 배포하면 아래 CACHE_VERSION 값이 바뀌지 않아도 매번 네트워크를
 // 우선 시도하기 때문에 최신 코드가 바로 반영돼요 (구버전이 캐시에 갇히지 않아요).
 
-var CACHE_VERSION = 'court-note-v1';
-var SHELL_FILES = ['/', '/index.html', '/manifest.json'];
+var CACHE_VERSION = 'court-note-v2-coach-isolation';
+var SHELL_FILES = ['/', '/index.html', '/manifest.json', '/coach-session.js'];
 
 self.addEventListener('install', function (event) {
   self.skipWaiting();
@@ -24,7 +24,7 @@ self.addEventListener('activate', function (event) {
     caches.keys().then(function (keys) {
       return Promise.all(
         keys
-          .filter(function (key) { return key !== CACHE_VERSION; })
+          .filter(function (key) { return key.indexOf('court-note-') === 0 && key !== CACHE_VERSION; })
           .map(function (key) { return caches.delete(key); })
       );
     }).then(function () { return self.clients.claim(); })

@@ -7,6 +7,7 @@
 
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
+const { getFirestore } = require('firebase-admin/firestore');
 
 function getAdminApp() {
   if (getApps().length) return getApps()[0];
@@ -37,11 +38,28 @@ module.exports = async function handler(req, res) {
     res.status(401).json({ error: 'missing_token' });
     return;
   }
+  let identity;
   try {
     getAdminApp();
-    await getAuth().verifyIdToken(token);
+    identity = await getAuth().verifyIdToken(token, true);
   } catch (err) {
     res.status(401).json({ error: 'invalid_token' });
+    return;
+  }
+
+  // A valid Firebase identity alone does not authorize a paid AI request.
+  if (!identity.email || identity.email_verified !== true) {
+    res.status(403).json({ error: 'coach_not_authorized' });
+    return;
+  }
+  try {
+    const coach = await getFirestore(getAdminApp()).collection('admins').doc(identity.email).get();
+    if (!coach.exists) {
+      res.status(403).json({ error: 'coach_not_authorized' });
+      return;
+    }
+  } catch (err) {
+    res.status(503).json({ error: 'authorization_unavailable' });
     return;
   }
 

@@ -1019,6 +1019,7 @@
       <div id="toast"></div>
     </div>
 
+    <script src="/coach-session.js"></script>
     <script>
       (function () {
         "use strict";
@@ -1125,6 +1126,7 @@
         var state = {
           tab: "today",
           db: null,
+          coachUid: null,
           sample: null,
           ready: {
             venues: false,
@@ -3585,40 +3587,35 @@
 
         /* ============================= 초기화 ============================= */
 
-        function subscribe(name) {
-          state.db.collection(name).onSnapshot(
-            function (snap) {
-              var m = {};
-              snap.docs.forEach(function (d) {
-                m[d.id] = d.data();
-              });
-              state.cache[name] = m;
-              state.ready[name] = true;
-              renderAll();
-            },
-            function (err) {
-              state.ready[name] = true;
-              renderAll();
-            },
-          );
-        }
-
-        function startCourtNoteApp(db) {
-          state.db = db;
-          renderNav();
-          renderAll();
-          [
-            "venues",
-            "members",
-            "lessons",
-            "passes",
-            "journals",
-            "skills",
-            "progress",
-          ].forEach(subscribe);
-        }
-        // 로그인 성공 시 아래 Firebase 스크립트가 이 함수를 호출해서 앱을 시작시켜요.
-        window.__startCourtNoteApp = startCourtNoteApp;
+        var coachSession = window.CourtNoteCoachSession.createSession({
+          onReset: function (scopedDb, coachUid) {
+            state.db = scopedDb;
+            state.coachUid = coachUid;
+            state.tab = "today";
+            state.memberDetailId = null;
+            state.scheduleShowPast = false;
+            state.scheduleVenueFilter = "all";
+            window.CourtNoteCoachSession.collections.forEach(function (name) {
+              state.cache[name] = {};
+              state.ready[name] = false;
+            });
+            closeModal();
+            NAV.forEach(function (item) { byId("view-" + item.id).hidden = item.id !== "today"; });
+            renderAll();
+          },
+          onSnapshot: function (name, snapshot) {
+            var data = {};
+            snapshot.docs.forEach(function (doc) { data[doc.id] = doc.data(); });
+            state.cache[name] = data;
+            state.ready[name] = true;
+            renderAll();
+          },
+          onError: function (error) {
+            if (window.__onCourtNoteAccessError) window.__onCourtNoteAccessError(error);
+          },
+        });
+        window.__startCourtNoteApp = function (db, user) { coachSession.start(db, user); };
+        window.__stopCourtNoteApp = function () { coachSession.stop(); };
       })();
     </script>
 
@@ -3646,42 +3643,76 @@
         firebase.initializeApp(firebaseConfig);
         var fbAuth = firebase.auth();
         var fbDb = firebase.firestore();
-        var started = false;
+        var startedUid = null;
+        var firstUid = null;
+        var authGeneration = 0;
+        var errEl = document.getElementById("login-error");
+        var sentEl = document.getElementById("login-sent");
+        var submitBtn = document.getElementById("login-submit");
 
-        function showApp() {
+        function showApp(user) {
+          // A new identity gets a fresh document, clearing pending UI promises too.
+          if (firstUid && firstUid !== user.uid) {
+            window.location.reload();
+            return;
+          }
+          firstUid = user.uid;
+          startedUid = user.uid;
+          window.__startCourtNoteApp(fbDb, user);
+          if (startedUid !== user.uid) return;
           document.getElementById("login-screen").hidden = true;
           document.getElementById("app-root").hidden = false;
-          if (!started) {
-            started = true;
-            window.__startCourtNoteApp(fbDb);
-          }
         }
         function showLogin() {
           document.getElementById("login-screen").hidden = false;
           document.getElementById("app-root").hidden = true;
         }
+        window.__onCourtNoteAccessError = function (error) {
+          startedUid = null;
+          showLogin();
+          errEl.textContent = error && error.code === "permission-denied"
+            ? "이 계정은 사용 권한이 없어요. 관리자에게 계정 등록을 요청해주세요."
+            : "데이터를 불러오지 못했어요. 연결 상태를 확인한 뒤 새로고침해주세요.";
+        };
 
         // AI 메모 정리 기능(court-note-deploy.html 안의 wireAi())이 이 함수로
         // 로그인 토큰을 받아서 /api/clean-note 서버 함수를 호출해요.
         window.__getIdToken = function () {
           var u = fbAuth.currentUser;
-          if (!u) return Promise.reject(new Error("not_signed_in"));
+          if (!u || startedUid !== u.uid) return Promise.reject(new Error("not_signed_in"));
           return u.getIdToken();
         };
 
         fbAuth.onAuthStateChanged(function (user) {
-          if (user) {
-            showApp();
-          } else {
-            showLogin();
+          var current = ++authGeneration;
+          startedUid = null;
+          window.__stopCourtNoteApp();
+          showLogin();
+          errEl.textContent = "";
+          if (!user) return;
+          if (!user.email || !user.emailVerified) {
+            errEl.textContent = "이메일 링크로 로그인하여 이메일 인증을 완료해주세요.";
+            return;
           }
+          errEl.textContent = "계정을 확인하고 있어요…";
+          fbDb.collection("admins").doc(user.email).get({ source: "server" })
+            .then(function (record) {
+              if (current !== authGeneration || !fbAuth.currentUser || fbAuth.currentUser.uid !== user.uid) return;
+              if (!record.exists) {
+                errEl.textContent = "이 계정은 사용 권한이 없어요. 관리자에게 계정 등록을 요청해주세요.";
+                return;
+              }
+              errEl.textContent = "";
+              showApp(user);
+            })
+            .catch(function () {
+              if (current !== authGeneration) return;
+              errEl.textContent = "계정 권한을 확인하지 못했어요. 연결 상태를 확인한 뒤 새로고침해주세요.";
+            });
         });
 
         // ---- 이메일 링크(비밀번호 없는) 로그인 ----
         var EMAIL_STORAGE_KEY = "courtNoteEmailForSignIn";
-        var errEl = document.getElementById("login-error");
-        var sentEl = document.getElementById("login-sent");
-        var submitBtn = document.getElementById("login-submit");
 
         // 메일 속 링크를 눌러서 이 페이지로 돌아온 경우, 자동으로 로그인을 완료해요.
         if (fbAuth.isSignInWithEmailLink(window.location.href)) {
@@ -3761,8 +3792,23 @@
         document
           .getElementById("btn-logout")
           .addEventListener("click", function () {
-            fbAuth.signOut();
+            authGeneration += 1;
+            startedUid = null;
+            window.__stopCourtNoteApp();
+            showLogin();
+            fbAuth.signOut().catch(function () {
+              errEl.textContent = "로그아웃을 완료하지 못했어요. 새로고침 후 다시 시도해주세요.";
+            });
           });
+        window.addEventListener("pagehide", function () {
+          authGeneration += 1;
+          startedUid = null;
+          window.__stopCourtNoteApp();
+          showLogin();
+        });
+        window.addEventListener("pageshow", function (event) {
+          if (event.persisted) window.location.reload();
+        });
       })();
     </script>
 
