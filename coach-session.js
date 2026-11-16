@@ -12,7 +12,10 @@
       if (COLLECTIONS.indexOf(name) === -1) throw new Error("unknown_coach_collection");
       return coach.collection(name);
     }
-    return Object.freeze({collection: collection, doc: function (documentPath) {
+    return Object.freeze({collection: collection, runTransaction: function (callback) {
+      if (typeof db.runTransaction !== "function") throw new Error("transactions_unavailable");
+      return db.runTransaction(callback);
+    }, doc: function (documentPath) {
       var parts = typeof documentPath === "string" ? documentPath.split("/") : [];
       if (parts.length !== 2 || !parts[1]) throw new Error("invalid_coach_document_path");
       return collection(parts[0]).doc(parts[1]);

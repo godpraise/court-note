@@ -5,8 +5,8 @@
 // 새 버전을 배포하면 아래 CACHE_VERSION 값이 바뀌지 않아도 매번 네트워크를
 // 우선 시도하기 때문에 최신 코드가 바로 반영돼요 (구버전이 캐시에 갇히지 않아요).
 
-var CACHE_VERSION = 'court-note-v2-coach-isolation';
-var SHELL_FILES = ['/', '/index.html', '/manifest.json', '/coach-session.js'];
+var CACHE_VERSION = 'court-note-v3-atomic-completion';
+var SHELL_FILES = ['/', '/index.html', '/manifest.json', '/coach-session.js', '/lesson-completion.js'];
 
 self.addEventListener('install', function (event) {
   self.skipWaiting();

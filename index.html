@@ -1020,6 +1020,7 @@
     </div>
 
     <script src="/coach-session.js"></script>
+    <script src="/lesson-completion.js"></script>
     <script>
       (function () {
         "use strict";
@@ -3157,43 +3158,26 @@
           state.db.doc("lessons/" + lessonId).update({ participants: parts });
         }
 
+        var pendingLessonCompletions = Object.create(null);
         function completeLesson(lessonId) {
-          var l = state.cache.lessons[lessonId];
-          if (!l) return;
-          var parts = (l.participants || []).map(function (p) {
-            return p.attendance === "scheduled"
-              ? Object.assign({}, p, { attendance: "done" })
-              : p;
-          });
-          var writes = [
-            state.db
-              .doc("lessons/" + lessonId)
-              .update({ status: "done", participants: parts }),
-          ];
-          parts.forEach(function (p) {
-            if (p.attendance !== "done") return;
-            if (p.passId) {
-              var pass = state.cache.passes[p.passId];
-              if (pass && pass.status === "active") {
-                var used = (pass.usedCount || 0) + 1;
-                var upd = { usedCount: used };
-                if (used >= pass.totalCount) {
-                  if ((pass.courtFeeAmount || 0) <= 0) {
-                    /* 장소 사용료 0%인 곳(예: 위닝샷클럽)은 코치가 100% 가져가서 보낼 돈이 없으므로
-                 정산 대기 없이 바로 완료 처리한다 */
-                    upd.status = "settled";
-                    upd.settledDate = l.date;
-                  } else {
-                    upd.status = "ready_settle";
-                    upd.readyDate = l.date;
-                  }
-                }
-                writes.push(state.db.doc("passes/" + p.passId).update(upd));
-              }
-            }
-          });
-          Promise.all(writes).then(function () {
-            toast("수업을 완료 처리했어요");
+          if (pendingLessonCompletions[lessonId]) return;
+          var db = state.db;
+          if (!db) return;
+          pendingLessonCompletions[lessonId] = true;
+          return window.CourtNoteLessonCompletion.completeLesson(db, lessonId).then(function (result) {
+            delete pendingLessonCompletions[lessonId];
+            if (state.db !== db) return;
+            toast(result.completed ? "수업을 완료 처리했어요" : "이미 완료된 수업이에요");
+          }, function (error) {
+            delete pendingLessonCompletions[lessonId];
+            if (state.db !== db) return;
+            var messages = {
+              pass_not_available: "수강권 상태나 남은 횟수를 확인해주세요. 저장하지 않았어요.",
+              pass_not_found: "연결된 수강권을 찾을 수 없어요. 저장하지 않았어요.",
+              lesson_not_scheduled: "완료할 수 있는 예약 상태가 아니에요.",
+              lesson_not_found: "수업을 찾을 수 없어요. 새로고침해주세요."
+            };
+            toast(messages[error.code] || "완료 처리를 저장하지 못했어요. 연결과 권한을 확인해주세요.");
           });
         }
 
